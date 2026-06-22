@@ -2987,6 +2987,99 @@ function brandAutoFromLogo(){
   toast("Brand color","Theme pulled from your logo.","green");
 }
 function brandizeDoc(s){ try{ return String(s).replace(/#5fd80a/gi, docAccentHex()); }catch(e){ return s; } }
+
+/* Multi-page branded proposal renderer (cover -> property overview ->
+   scope-of-work cards -> investment summary -> terms -> acceptance).
+   Renders into the print modal; accent comes from the contractor brand
+   via brandizeDoc, so each contractor's proposal prints in their theme. */
+function printProposalDocFull(id){
+  var p=prop(id); if(!p) return;
+  var c=cust(p.customerId), co=DB.company, T=propTotals(p), stage=p.stage||"budgetary";
+  var stageLabel=stage==="firm"?"FIRM PROPOSAL":"BUDGETARY PROPOSAL";
+  var items=p.items||[];
+  function E(v){ return esc(v==null?"":(""+v)); }
+  function pad2(n){ n=+n||0; return n<10?("0"+n):(""+n); }
+  function metaCell(l,v){ return '<div class="prp-mcell"><div class="prp-ml">'+E(l)+'</div><div class="prp-mv">'+E(v)+'</div></div>'; }
+  function fact(l,h){ return '<div class="prp-fact"><div class="prp-fl">'+E(l)+'</div><div class="prp-fv">'+h+'</div></div>'; }
+  function glance(l,v){ return '<div class="prp-glance"><div class="prp-gv">'+E(v)+'</div><div class="prp-gl">'+E(l)+'</div></div>'; }
+  function termClause(t,b){ return '<div class="prp-clause"><div class="prp-clause-t">'+E(t)+'</div><div class="prp-clause-b">'+E(b)+'</div></div>'; }
+  function sh(n,t,d){ return '<div class="prp-sh"><div class="prp-sh-n">'+n+'</div><div class="prp-sh-x"><div class="prp-sh-t">'+E(t)+'</div>'+(d?'<div class="prp-sh-d">'+E(d)+'</div>':'')+'</div></div>'; }
+  var pageNo=0;
+  var sowGroups=[]; for(var gi=0; gi<items.length; gi+=4){ sowGroups.push(items.slice(gi,gi+4)); }
+  if(!sowGroups.length) sowGroups=[[]];
+  var contentTotal=1+sowGroups.length+3;
+  function ph(){ return '<div class="prp-ph"><img src="'+companyLogoSrc()+'" alt=""><div class="prp-ph-r">'+E(stageLabel)+'  ·  '+E(p.id)+'</div></div>'; }
+  function pf(){ pageNo++; return '<div class="prp-spacer"></div><div class="prp-pf"><span>'+E(co.name)+(co.phone?'  ·  '+E(co.phone):'')+'</span><span>Page '+pageNo+' of '+contentTotal+'</span></div>'; }
+
+  var povRaw=(p.propertyOverview||"").trim();
+  if(!povRaw){ var _pt=(c&&c.type)?((""+c.type).charAt(0).toUpperCase()+(""+c.type).slice(1)):"Commercial"; povRaw=(c&&c.name?c.name:"The property")+(c&&c.address?", at "+c.address+",":"")+" is a "+_pt.toLowerCase()+" property prepared for the scope of work detailed in this proposal by "+co.name+"."; }
+  var disclaimer=stage==="firm"
+    ? "Firm pricing reflects current confirmed vendor quotes and recently invoiced costs. It is valid through the date shown; pricing is subject to change after expiry due to material-market movement."
+    : "This budgetary estimate is provided for planning and approval. Unit pricing is derived from a trailing "+priceWindowDays()+"-day average of comparable completed work and carries a "+T.pct+"% contingency for commodity price movement. A firm proposal with exact, confirmed pricing follows approval.";
+
+  var cover='<div class="prp-page prp-cover">'+
+    '<div class="prp-cv-top"><img src="'+companyLogoSrc()+'" alt="'+E(co.name)+'" class="prp-cv-logo"><div class="prp-cv-co"><b>'+E(co.name)+'</b>'+((co.phone||co.website)?'<span>'+E(co.phone)+(co.website?'  ·  '+E(co.website):'')+'</span>':'')+'</div></div>'+
+    '<div class="prp-cv-mid"><div class="prp-cv-kick">'+E(stageLabel)+'</div><div class="prp-cv-rule"></div><h1 class="prp-cv-title">'+E(p.title)+'</h1><div class="prp-cv-for">Prepared for <b>'+E(c?c.name:"")+'</b>'+(c&&c.address?'<div class="prp-cv-addr">'+E(c.address)+'</div>':'')+'</div></div>'+
+    '<div class="prp-cv-meta">'+metaCell("Proposal",p.id)+metaCell("Date",fmtDate(isoFromTs(p.createdAt)))+metaCell("Valid until",fmtDate(p.validUntil))+metaCell("Prepared by",co.name)+'</div>'+
+    '<div class="prp-cv-foot"><span>'+E(co.name)+'</span><span>'+E(co.address)+'</span></div>'+
+  '</div>';
+
+  var overview='<div class="prp-page">'+ph()+
+    sh("01","Property Overview","")+
+    '<div class="prp-lead">'+E(povRaw)+'</div>'+
+    '<div class="prp-facts">'+
+      fact("Property",'<b>'+E(c?c.name:"")+'</b>'+(c&&c.address?'<br>'+E(c.address):'')+(c&&c.contact?'<br>Attn: '+E(c.contact):''))+
+      fact("Engagement",'<b>'+E(p.title)+'</b><br>'+(stage==="firm"?"Capital improvement · firm pricing":"Capital improvement · budgetary estimate")+'<br>Prepared by '+E(co.name))+
+    '</div>'+
+    '<div class="prp-glances">'+glance("Total investment",money(T.total))+glance("Scope items",String(items.length))+glance("Valid until",fmtDate(p.validUntil))+'</div>'+
+    pf()+
+  '</div>';
+
+  var sow=sowGroups.map(function(group,idx){
+    var cards=group.map(function(it,j){ var n=idx*4+j+1, amt=(+it.qty||0)*(+it.rate||0);
+      return '<div class="prp-card"><div class="prp-card-n">'+pad2(n)+'</div><div class="prp-card-b"><div class="prp-card-t">'+E(it.desc||("Scope item "+n))+'</div>'+(it.basis?'<div class="prp-card-d">'+E(it.basis)+'</div>':'')+'<div class="prp-card-m">Quantity '+E(it.qty)+'  ·  Unit '+money(it.rate)+'</div></div><div class="prp-card-p">'+money(amt)+'</div></div>';
+    }).join("")||'<div class="prp-empty">No scope items have been added to this proposal yet.</div>';
+    return '<div class="prp-page">'+ph()+sh("02","Scope of Work",idx===0?"Each item below is a defined scope of work; its price rolls up to the Investment Summary.":"Continued")+cards+pf()+'</div>';
+  }).join("");
+
+  var recap=items.map(function(it){ var amt=(+it.qty||0)*(+it.rate||0); return '<tr><td>'+E(it.desc)+'</td><td class="prp-r">'+E(it.qty)+'</td><td class="prp-r prp-mono">'+money(it.rate)+'</td><td class="prp-r prp-mono">'+money(amt)+'</td></tr>'; }).join("")||'<tr><td colspan="4" class="prp-empty">No items.</td></tr>';
+  var investment='<div class="prp-page">'+ph()+
+    sh("03","Investment Summary","")+
+    '<table class="prp-tbl"><thead><tr><th>Scope</th><th class="prp-r">Qty</th><th class="prp-r">Unit</th><th class="prp-r">Amount</th></tr></thead><tbody>'+recap+'</tbody></table>'+
+    '<div class="prp-tot"><div class="prp-tr"><span>Subtotal</span><span class="prp-mono">'+money(T.sub)+'</span></div>'+(T.pct?'<div class="prp-tr"><span>Contingency ('+T.pct+'%)</span><span class="prp-mono">'+money(T.contAmt)+'</span></div>':'')+(p.taxRate?'<div class="prp-tr"><span>Tax ('+p.taxRate+'%)</span><span class="prp-mono">'+money(T.tax)+'</span></div>':'')+'<div class="prp-tr prp-grand"><span>'+(stage==="firm"?"Firm Total":"Budgetary Total")+'</span><span class="prp-mono">'+money(T.total)+'</span></div></div>'+
+    '<div class="prp-note">'+E(disclaimer)+'</div>'+
+    pf()+
+  '</div>';
+
+  var terms='<div class="prp-page">'+ph()+
+    sh("04","Terms & Conditions","")+
+    '<div class="prp-terms">'+
+      termClause("Validity","Pricing is valid through the date shown on the cover. Estimates expire automatically and may be re-quoted thereafter to reflect current material and labor markets.")+
+      termClause("Schedule of work","Work is performed during normal business hours unless otherwise noted. After-hours or expedited labor is billed separately unless explicitly included in the scope above.")+
+      termClause("Permits and concealed conditions","Permits, code-required upgrades, and concealed or pre-existing conditions discovered during the work are billed separately unless explicitly itemized in the scope.")+
+      termClause("Payment terms","A 50% mobilization deposit is due on capital projects to release the work; the balance is net 30 from invoice. Firm proposals require a purchase order to release.")+
+      termClause("Warranty","One (1) year on labor performed by "+co.name+"; manufacturer warranty applies to installed equipment. Warranty excludes damage from misuse, neglect, or work performed by others.")+
+    '</div>'+
+    pf()+
+  '</div>';
+
+  var acceptance='<div class="prp-page">'+ph()+
+    sh("05","Acceptance & Authorization","")+
+    '<div class="prp-accept-lead">By signing below, the client authorizes '+E(co.name)+' to perform the scope of work detailed in this proposal at the pricing shown, subject to the terms and conditions herein.</div>'+
+    '<div class="prp-sign"><div class="prp-sign-col"><div class="prp-sign-line"></div><div class="prp-sign-lbl">Authorized signature · '+E(c?c.name:"Client")+'</div></div><div class="prp-sign-col prp-sign-date"><div class="prp-sign-line"></div><div class="prp-sign-lbl">Date</div></div></div>'+
+    '<div class="prp-sign"><div class="prp-sign-col"><div class="prp-sign-line"></div><div class="prp-sign-lbl">Printed name &amp; title</div></div><div class="prp-sign-col prp-sign-date"><div class="prp-sign-line"></div><div class="prp-sign-lbl">'+(stage==="firm"?"PO number":"Reference")+'</div></div></div>'+
+    (stage==="firm"?'<div class="prp-po">Purchase order required to release: '+(p.poNumber?'<b>'+E(p.poNumber)+'</b>':'<i>to be assigned</i>')+'</div>':'')+
+    '<div class="prp-accept-foot">'+E(co.name)+(co.phone?'  ·  '+E(co.phone):'')+(co.email?'  ·  '+E(co.email):'')+(co.website?'  ·  '+E(co.website):'')+'</div>'+
+    pf()+
+  '</div>';
+
+  var css='<style>.prp-doc{--pa:#5fd80a;font-family:var(--sans);color:#16161a}.prp-page{background:#fff;color:#16161a;max-width:800px;margin:0 auto 22px;padding:48px 52px;box-sizing:border-box;min-height:1010px;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.18);border-radius:4px}.prp-ph{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e6e6ec;padding-bottom:12px;margin-bottom:26px}.prp-ph img{height:26px;width:auto;display:block}.prp-ph-r{font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;color:#9a9aa3;text-transform:uppercase}.prp-spacer{flex:1 1 auto;min-height:18px}.prp-pf{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #e6e6ec;padding-top:11px;margin-top:18px;font-size:10.5px;color:#9a9aa3;font-family:var(--mono);letter-spacing:.4px}.prp-sh{display:flex;gap:14px;align-items:flex-start;margin-bottom:18px}.prp-sh-n{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--pa);border:1.5px solid var(--pa);border-radius:7px;padding:3px 8px;line-height:1;margin-top:2px}.prp-sh-t{font-family:var(--disp);font-weight:700;font-size:20px;letter-spacing:.3px;text-transform:uppercase;color:#16161a;line-height:1.1}.prp-sh-d{font-size:12px;color:#5f5f68;margin-top:5px;line-height:1.5;max-width:580px}.prp-lead{font-size:14.5px;line-height:1.95;color:#2a2a30;text-align:justify;letter-spacing:.1px}.prp-facts{display:flex;margin-top:24px;border-top:1px solid #e6e6ec;border-bottom:1px solid #e6e6ec}.prp-fact{flex:1;padding:16px 18px}.prp-fact+.prp-fact{border-left:1px solid #e6e6ec}.prp-fl{font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:#9a9aa3;font-weight:700;margin-bottom:6px}.prp-fv{font-size:13px;color:#33333a;line-height:1.55}.prp-glances{display:flex;gap:14px;margin-top:24px}.prp-glance{flex:1;background:#f7f7f9;border:1px solid #e6e6ec;border-radius:9px;padding:15px 16px}.prp-gv{font-family:var(--disp);font-weight:700;font-size:22px;color:#16161a;letter-spacing:.3px}.prp-gl{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#9a9aa3;font-weight:700;margin-top:5px}.prp-cover{justify-content:flex-start;padding-top:54px}.prp-cv-top{display:flex;align-items:flex-start;justify-content:space-between}.prp-cv-logo{height:60px;width:auto;display:block}.prp-cv-co{text-align:right;line-height:1.6}.prp-cv-co b{display:block;font-family:var(--disp);font-size:15px;color:#16161a;letter-spacing:.3px}.prp-cv-co span{font-family:var(--mono);font-size:10.5px;color:#9a9aa3}.prp-cv-mid{margin-top:118px}.prp-cv-kick{font-family:var(--mono);font-weight:700;letter-spacing:3px;font-size:12px;color:var(--pa);text-transform:uppercase}.prp-cv-rule{height:3px;width:66px;background:var(--pa);margin:14px 0 24px;border-radius:2px}.prp-cv-title{font-family:var(--disp);font-weight:700;font-size:42px;line-height:1.08;letter-spacing:.2px;color:#16161a;margin:0 0 20px;max-width:92%}.prp-cv-for{font-size:15px;color:#33333a}.prp-cv-addr{font-size:13px;color:#5f5f68;margin-top:5px}.prp-cv-meta{display:flex;margin-top:108px;border-top:1px solid #e6e6ec;padding-top:20px}.prp-mcell{flex:1;padding-right:14px}.prp-ml{font-size:9.5px;text-transform:uppercase;letter-spacing:1px;color:#9a9aa3;font-weight:700;margin-bottom:5px}.prp-mv{font-family:var(--mono);font-size:13px;color:#16161a;font-weight:600;word-break:break-word}.prp-cv-foot{margin-top:26px;border-top:1px solid #e6e6ec;padding-top:14px;display:flex;justify-content:space-between;font-size:10.5px;color:#9a9aa3;font-family:var(--mono);letter-spacing:.4px}.prp-card{display:flex;border:1px solid #e6e6ec;border-radius:11px;overflow:hidden;margin-bottom:13px;background:#fff}.prp-card-n{flex:0 0 auto;width:48px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:15px;color:var(--pa);border-right:1px solid #e6e6ec;background:#fafafb}.prp-card-b{flex:1;padding:14px 16px;min-width:0}.prp-card-t{font-family:var(--disp);font-weight:700;font-size:15px;color:#16161a;letter-spacing:.2px;line-height:1.25}.prp-card-d{font-size:12.5px;color:#5f5f68;line-height:1.55;margin-top:5px}.prp-card-m{font-size:10.5px;color:#9a9aa3;font-family:var(--mono);letter-spacing:.4px;margin-top:8px;text-transform:uppercase}.prp-card-p{flex:0 0 auto;display:flex;align-items:center;padding:0 18px;font-family:var(--mono);font-weight:700;font-size:16px;color:#16161a;border-left:1px solid #e6e6ec;background:#fafafb}.prp-empty{font-size:13px;color:#9a9aa3;padding:18px;border:1px dashed #e6e6ec;border-radius:10px;text-align:center}.prp-tbl{width:100%;border-collapse:collapse;font-size:13px}.prp-tbl th{text-align:left;padding:9px 10px;border-bottom:2px solid var(--pa);font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#5f5f68}.prp-tbl td{padding:9px 10px;border-bottom:1px solid #e6e6ec;color:#33333a}.prp-r{text-align:right}.prp-mono{font-family:var(--mono)}.prp-tot{margin-left:auto;width:330px;margin-top:16px}.prp-tr{display:flex;justify-content:space-between;padding:6px 0;font-size:13.5px;color:#33333a}.prp-grand{border-top:2px solid var(--pa);margin-top:6px;padding-top:12px;font-weight:700;font-size:19px;color:#16161a}.prp-grand span:last-child{color:var(--pa)}.prp-note{margin-top:22px;padding:13px 15px;background:#f7f7f9;border-left:3px solid var(--pa);border-radius:0 7px 7px 0;font-size:11.5px;color:#55555c;line-height:1.6}.prp-terms{display:flex;flex-direction:column;gap:16px}.prp-clause-t{font-family:var(--disp);font-weight:700;font-size:13.5px;color:#16161a;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}.prp-clause-t::before{content:"";display:inline-block;width:14px;height:2px;background:var(--pa);vertical-align:middle;margin-right:9px}.prp-clause-b{font-size:12.5px;color:#44444c;line-height:1.65;padding-left:23px}.prp-accept-lead{font-size:13.5px;color:#33333a;line-height:1.7;margin-bottom:32px}.prp-sign{display:flex;gap:34px;margin-bottom:26px}.prp-sign-col{flex:1}.prp-sign-date{flex:0 0 170px}.prp-sign-line{border-bottom:1.5px solid #16161a;height:42px}.prp-sign-lbl{font-size:10.5px;color:#5f5f68;margin-top:7px}.prp-po{margin-top:8px;font-size:12px;color:#44444c}.prp-accept-foot{margin-top:32px;text-align:center;font-size:11px;color:#9a9aa3;font-family:var(--mono);letter-spacing:.4px}@page{size:letter;margin:0}@media print{#view{display:none!important}.modal-h{display:none!important}.modal,.modal-b{max-height:none!important;overflow:visible!important}.prp-page{box-shadow:none;border-radius:0;margin:0;max-width:100%;min-height:auto;padding:0.5in 0.55in;break-after:page;page-break-after:always}.prp-page:last-child{break-after:auto;page-break-after:auto}}</style>';
+
+  var html=css+'<div class="prp-doc">'+cover+overview+sow+investment+terms+acceptance+'</div>';
+  html=brandizeDoc(html);
+  openModal({ title:(stage==="firm"?"Firm Proposal ":"Budgetary Proposal ")+p.id, sub:"Multi-page proposal · "+(c?c.name:""), body:html, size:"lg",
+    footer:'<button class="btn ghost" data-action="close-modal">Close</button><button class="btn primary" data-action="do-print">'+svg("print")+'Generate / Print</button>' });
+}
 var CAT_LABEL = { capacitor:"Capacitor", contactor:"Contactor", compressor:"Compressor", motor:"Motor / blower",
   belt:"Belt", filter:"Filters", coil:"Coil cleaning", refrigerant:"Refrigerant", thermostat:"Thermostat",
   controls:"Controls / economizer", pm:"Preventive maintenance", diagnostic:"Diagnostic / service call",
@@ -9235,7 +9328,7 @@ document.addEventListener("click", function(e){
       if(pa.stage==="firm" && DB.automations && DB.automations.firmToPO && !pa.poNumber){ render(); poPrompt(pa.id); break; }
       render(); openProp(id); break; }
     case "decline-prop": var pd=prop(id); pd.status="declined"; saveDB(); openProp(id); toast("Marked declined",id+" updated.","warm"); break;
-    case "print-prop": printProposalDoc(id); break;
+    case "print-prop": printProposalDocFull(id); break;
     case "prop-invoice": var pi=prop(id); closeModal(); invFormFromProp(pi); break;
     case "prop-stage": { var pstg=elem.getAttribute("data-stage"); if(App.draftCtx) App.draftCtx.stage=pstg; if(byId("p_stage")) byId("p_stage").value=pstg; var bs=document.querySelectorAll(".stagetoggle button"); for(var bi=0;bi<bs.length;bi++){ bs[bi].classList.toggle("on", bs[bi].getAttribute("data-stage")===pstg); } if(byId("p_cont_wrap")) byId("p_cont_wrap").style.display = pstg==="budgetary"?"":"none"; if(byId("p_po_wrap")) byId("p_po_wrap").style.display = pstg==="firm"?"":"none"; refreshDraftContext(); break; }
     case "draft-avg": pullAvgForDraftLine(+elem.getAttribute("data-i")); break;
